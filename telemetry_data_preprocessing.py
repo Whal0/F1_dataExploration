@@ -1,44 +1,44 @@
-import requests
+#import requests
+
+# class request_data:
+    
+#     def __init__(self):
+#         self.url = 'https://api.openf1.org/v1'
+    
+#     def fetch_data(self, url, params=None):
+        
+#         response = requests.get(url, params=params)
+#         if response.status_code == 200:
+#             return response.json()
+#         else:
+#             return f"Error while fetching data: {response.status_code}"
+        
+#     def get_car_data(self, params=None):
+    
+#         url = f'{self.url}/car_data'
+
+#         return self.fetch_data(url, params)
+        
+#     def get_laps_data(self, params=None):
+        
+#         url = f'{self.url}/laps'
+
+#         return self.fetch_data(url, params)
+    
+#     def get_session_data(self, params=None):
+        
+#         url = f'{self.url}/sessions'
+        
+#         return self.fetch_data(url, params)
+    
+#     def get_location_data(self, params=None):
+        
+#         url = f'{self.url}/location'
+        
+#         return self.fetch_data(url, params)
+    
 import numpy as np
 import math
-
-class request_data:
-    
-    def __init__(self):
-        self.url = 'https://api.openf1.org/v1'
-    
-    def fetch_data(self, url, params=None):
-        
-        response = requests.get(url, params=params)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return f"Error while fetching data: {response.status_code}"
-        
-    def get_car_data(self, params=None):
-    
-        url = f'{self.url}/car_data'
-
-        return self.fetch_data(url, params)
-        
-    def get_laps_data(self, params=None):
-        
-        url = f'{self.url}/laps'
-
-        return self.fetch_data(url, params)
-    
-    def get_session_data(self, params=None):
-        
-        url = f'{self.url}/sessions'
-        
-        return self.fetch_data(url, params)
-    
-    def get_location_data(self, params=None):
-        
-        url = f'{self.url}/location'
-        
-        return self.fetch_data(url, params)
-    
     
 class telemetry_preprocessing:
     
@@ -296,7 +296,7 @@ class telemetry_computations:
         lat_acc_g_clean = self.remove_acceleration_outliers(lat_acc_g)
 
         # --- Return rounded results ---
-        return np.round(lon_acc_g_clean, 2), np.round(lat_acc_g_clean, 2)
+        return np.round(lon_acc_g_clean, 5), np.round(lat_acc_g_clean, 5)
     
 import fastf1
 
