@@ -1,3 +1,7 @@
+import numpy as np
+import math
+import fastf1
+
 #import requests
 
 # class request_data:
@@ -37,9 +41,6 @@
         
 #         return self.fetch_data(url, params)
     
-import numpy as np
-import math
-    
 class telemetry_preprocessing:
     
     def __init__(self):
@@ -71,8 +72,6 @@ class telemetry_preprocessing:
             start_index = self.data_closest_timestamp(df2_date[0], df1)
             stop_index = df1.shape[0] - start_index
             return df1.iloc[start_index:].join(df2.iloc[:stop_index], lsuffix='_left')
-
-import pandas as pd
 
 class telemetry_computations:
     
@@ -298,8 +297,6 @@ class telemetry_computations:
         # --- Return rounded results ---
         return np.round(lon_acc_g_clean, 5), np.round(lat_acc_g_clean, 5)
     
-import fastf1
-
 def test():
     
     session = fastf1.get_session(2023, 'Bahrain', 'R')
@@ -317,6 +314,8 @@ def test():
     
     return lon, lat
 
-lon, lat = test()
+if __name__ == '__main__':
 
-print(lon, lat)
+    lon, lat = test()
+
+    print(lon, lat)
