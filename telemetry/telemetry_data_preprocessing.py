@@ -1,6 +1,10 @@
 import numpy as np
 import math
 import fastf1
+import pandas as pd
+
+
+## to co wykomentowane zostawiam na potem bo może mi sie jeszcze przydać
 
 #import requests
 
@@ -41,38 +45,152 @@ import fastf1
         
 #         return self.fetch_data(url, params)
     
-class telemetry_preprocessing:
+# class telemetry_preprocessing:
     
-    def __init__(self):
-         pass
+#     def __init__(self):
+#          pass
      
-    def data_closest_timestamp(self, time, data):
+    # def data_closest_timestamp(self, time, data):
     
-        minimal_diff = np.abs(time - data["date"][0])
-        minimal_index = 0
+    #     minimal_diff = np.abs(time - data["date"][0])
+    #     minimal_index = 0
         
-        for index, value in data['date'].items():
-            diff = np.abs(time - value)
-            if minimal_diff > diff:
-                minimal_diff = diff
-                minimal_index = index
+    #     for index, value in data['date'].items():
+    #         diff = np.abs(time - value)
+    #         if minimal_diff > diff:
+    #             minimal_diff = diff
+    #             minimal_index = index
             
-        return minimal_index
+    #     return minimal_index
 
-    def join_frames_by_date(self, df1, df2):
+    # def join_frames_by_date(self, df1, df2):
     
-        df1_date = df1["date"]
-        df2_date = df2["date"]
+    #     df1_date = df1["date"]
+    #     df2_date = df2["date"]
         
-        if df1_date[0] > df2_date[0]:
-            start_index = self.data_closest_timestamp(df1_date[0], df2)
-            stop_index = df2.shape[0] - start_index 
-            return df1.iloc[:stop_index].DataFrame.join(df2.iloc[start_index:], lsuffix='_left')
-        else:
-            start_index = self.data_closest_timestamp(df2_date[0], df1)
-            stop_index = df1.shape[0] - start_index
-            return df1.iloc[start_index:].join(df2.iloc[:stop_index], lsuffix='_left')
+    #     if df1_date[0] > df2_date[0]:
+    #         start_index = self.data_closest_timestamp(df1_date[0], df2)
+    #         stop_index = df2.shape[0] - start_index 
+    #         return df1.iloc[:stop_index].DataFrame.join(df2.iloc[start_index:], lsuffix='_left')
+    #     else:
+    #         start_index = self.data_closest_timestamp(df2_date[0], df1)
+    #         stop_index = df1.shape[0] - start_index
+    #         return df1.iloc[start_index:].join(df2.iloc[:stop_index], lsuffix='_left')
 
+
+
+## do dzielenia kolumny accelerations na dodatnie i ujemne
+def divide_column_by_sign(df : pd.DataFrame, column : str) -> pd.DataFrame:
+    
+    df[f"positive_{column}"] = df[column].apply(lambda x: 0 if x < 0 else x)
+    df[f"negative_{column}"] = df[column].apply(lambda x: 0 if x > 0 else x)
+    
+    return df       
+
+## funkcja do ładowania danych
+def load_data():
+    global global_df
+
+    session = fastf1.get_session(2023, 'Bahrain', 'R')
+    session.load(telemetry=True)
+    laps = session.laps
+
+    global_df = laps.copy()  # zachowaj pełne dane globalnie (opcjonalnie)
+
+    # Filtrowanie i kopiowanie
+    df = laps.dropna(subset=['LapTime', 'LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL']).copy()
+    df['LapTime_sec'] = df['LapTime'].dt.total_seconds()
+
+    # Zbieranie telemetrii
+    telemetry_data = []
+    for _, lap in df.iterrows():
+        tel = lap.get_telemetry()
+        tel['DriverNumber'] = lap['DriverNumber']  
+        tel['LapNumber'] = lap['LapNumber']
+        telemetry_data.append(tel)
+
+    
+    telemetry_df = pd.concat(telemetry_data, ignore_index=True)
+    telemetry_df['DriverNumber'] = telemetry_df['DriverNumber'].astype(int)
+    # Przygotowanie X i y
+    X = df[['LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL']]
+    y = df['LapTime_sec']
+    
+    return telemetry_df, X, y, df
+
+## klasa dla telemetrii z funkcjami pomocniczymi
+class Telemetry: 
+
+    def __init__(self, data : pd.DataFrame):
+        self.data = data
+
+    def normalize_drs(self):
+
+        self.data.DRS = self.data.DRS.apply(lambda x: 1 if x in [10, 12, 14] else 0)
+        
+        return self
+
+    def calculate_mean_lap_speed(self):
+
+        self.data["mean_lap_speed"] = self.data.groupby(["DriverNumber", "LapNumber"])["Speed"].transform("mean")
+
+        return self
+
+    def compute_accelerations(self):
+
+        computations = telemetry_computations()
+
+        all_lon, all_lat = [], []
+
+        for (driver, lap), group in self.data.groupby(['DriverNumber', 'LapNumber']):
+            group = group.sort_values('Time')  # sort before computing derivatives
+            lon_, lat_ = computations.compute_accelerations(telemetry=group)
+            all_lon.append(lon_)
+            all_lat.append(lat_)
+
+        all_lon_series = [pd.Series(arr) for arr in all_lon]
+        all_lat_series = [pd.Series(arr) for arr in all_lat]
+
+        self.data['lon_acc'] = pd.concat(all_lon_series, ignore_index=True)
+        self.data['lat_acc'] = pd.concat(all_lat_series, ignore_index=True)
+    
+        self.data['abs_lat_acc'] = self.data['lat_acc'].abs()
+        self.data['abs_lon_acc'] = self.data['lon_acc'].abs()
+
+        self.data['sum_lat_acc'] = self.data.groupby(['DriverNumber', 'LapNumber'])['abs_lat_acc'].transform('sum')
+        self.data['sum_lon_acc'] = self.data.groupby(['DriverNumber', 'LapNumber'])['abs_lon_acc'].transform('sum')
+
+        return self
+
+
+    def calculate_lap_progress(self):
+        
+        self.data['TimeNumberLapTime'] = self.data.groupby(['DriverNumber', 'LapNumber']).cumcount() + 1
+        self.data['TimeNumberLapCounts'] = self.data.groupby(['DriverNumber', 'LapNumber'])['LapNumber'].transform('count')
+
+        self.data['LapProgress'] = self.data['TimeNumberLapTime'] / self.data['TimeNumberLapCounts']
+        
+        return self
+
+    ## mało eleganckie, ale jakos musze wyciągać dane dla pojedyńczego lapa z telemetrii
+
+    def get_single_lap_data(self):
+        
+        final_df = pd.DataFrame(columns=self.data.columns)
+
+        for driver in self.data['DriverNumber'].unique():
+            driver_df = self.data[self.data['DriverNumber'] == driver]
+            laps = int(driver_df['LapNumber'].max())
+
+            for lap in range(1, laps + 1):
+                lap_df = driver_df[driver_df['LapNumber'] == lap]
+                if not lap_df.empty:
+                    final_row = lap_df.iloc[[-1], :]
+                    final_df = pd.concat([final_df, final_row], axis=0)
+
+        return final_df
+
+## klasa do obliczania przyśpieszeń
 class telemetry_computations:
     
     def __init__(self):
@@ -296,7 +414,7 @@ class telemetry_computations:
 
         # --- Return rounded results ---
         return np.round(lon_acc_g_clean, 5), np.round(lat_acc_g_clean, 5)
-    
+
 def test():
     
     session = fastf1.get_session(2023, 'Bahrain', 'R')
