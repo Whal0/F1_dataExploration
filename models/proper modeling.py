@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import optuna
 import seaborn as sns
 
-global_df = None
+
 
 def load_data():
     global global_df

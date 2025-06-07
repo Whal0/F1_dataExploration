@@ -34,16 +34,19 @@ def download_telemetry(gp, session_type, output_file=None):
         session.load(telemetry=True)
         df = session.laps
 
-        telemetry_data = [
-        lap.get_telemetry().assign(LapNumber=lap['LapNumber'])
-        for _, lap in df.iterrows()
-        if lap.get_telemetry() is not None and not lap.get_telemetry().empty
-    ]
+        telemetry_data = []
+        for _, lap in df.iterrows():
+            tel = lap.get_telemetry()
+            tel['DriverNumber'] = lap['DriverNumber']  
+            tel['LapNumber'] = lap['LapNumber']
+            telemetry_data.append(tel)
+
 
         telemetry_df = pd.concat(telemetry_data, ignore_index=True)
-        telemetry_df.to_pickle(output_file, protocol=pickle.HIGHEST_PROTOCOL)
+        telemetry_df.to_pickle(output_file)
         
         print(f"Telemetry saved to {output_file}")
+        
         output_file = None
     except Exception as e:
         print(f"Error: {str(e)}")
