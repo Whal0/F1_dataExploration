@@ -44,7 +44,7 @@ def download_telemetry(gp, session_type, output_file=None):
         telemetry_df.to_pickle(output_file, protocol=pickle.HIGHEST_PROTOCOL)
         
         print(f"Telemetry saved to {output_file}")
-        
+        output_file = None
     except Exception as e:
         print(f"Error: {str(e)}")
 
