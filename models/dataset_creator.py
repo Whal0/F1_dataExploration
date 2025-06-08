@@ -4,13 +4,15 @@ import fastf1
 import glob
 import sys
 import os
+from sktime.distances import distance
+from dtaidistance import dtw
 
 sys.path.append('..')
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from telemetry.telemetry_data_preprocessing import TelemetryProcessing
 from loader import load_telemetry
 
-# jak ja gardze file handiling w py (tak to dziala bo rekursywnie idziemy od tego pliku) XDDDDDD
+# jak ja gardze file handiling w py (tak to dziala) XDDDDDD
 cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cache')
 if not os.path.exists(cache_dir):
     os.makedirs(cache_dir)
@@ -130,11 +132,69 @@ def build_dataset(gp_name, year=2023, fuel_start=100):
         on=['DriverNumber', 'LapNumber'],
         how='left'
     )
+
+    quali = fastf1.get_session(year, gp_name, 'Q')
+    quali.load(telemetry=True, messages= False, weather=False)
+    ref_singnal_df = pd.DataFrame()
+
+    for driver in tel.data['DriverNumber'].unique():
+        driver_laps = quali.laps.pick_drivers(driver)
+        fastest_lap = driver_laps.pick_fastest()
+        
+        
+        if fastest_lap is None and not driver_laps.empty:
+            fastest_lap = session.laps.pick_drivers(driver)
+        
+        if fastest_lap is not None:
+            q_lap = fastest_lap.get_telemetry()
+            q_lap['DriverNumber'] = driver
+            q_lap['LapNumber'] = 1.0
+            
+            q_lap = TelemetryProcessing(q_lap)
+            q_lap.compute_accelerations()
+            
+            q_lap.data.drop(columns='LapNumber', inplace=True)
+            
+            ref_singnal_df = pd.concat([ref_singnal_df, q_lap.data], axis=0)
+
+    distance_records = []
+    ref_singnal_df = ref_singnal_df.set_index('DriverNumber')
+    for driver, group in tel.data.groupby('DriverNumber'):
+
+        ref_signal = ref_singnal_df.loc[driver]
+
+        # Drop NaN values before converting to numpy arrays
+        ref_lon = np.array(ref_signal['LonAcc'].dropna().values, dtype=np.double)
+        ref_lat = np.array(ref_signal['LatAcc'].dropna().values, dtype=np.double)
+
+        for lap in group['LapNumber'].unique():
+            lap_df2 = group[group['LapNumber'] == lap]
+
+            # Drop NaN values for lap data too
+            lap_lon = np.array(lap_df2['LonAcc'].dropna().values, dtype=np.double)
+            lap_lat = np.array(lap_df2['LatAcc'].dropna().values, dtype=np.double)
+            
+
+            # Compute DTW distances
+            distances_lon = dtw.distance_fast(ref_lon, lap_lon)
+            distances_lat = dtw.distance_fast(ref_lat, lap_lat)
+            distance_records.append({
+                    'DriverNumber': driver,
+                    'LapNumber': lap,
+                    'LonDistanceDTW': distances_lon,
+                    'LatDistanceDTW': distances_lat
+                })
+
+    
+
+    dist_df = pd.DataFrame(distance_records)
+    lap_df = pd.merge(lap_df,dist_df, on=['DriverNumber', 'LapNumber'], how='left')
+
     #--------------POGODA-------------------------------    
     
     
     # ----------------SKLADANIE-------------------
-    final_cols = ['Driver', 'Compound', 'TyreLife', 'StartFuel', 'FCL', 'LapTime', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'SumLonAcc', 'SumLatAcc', 'MeanLapSpeed']
+    final_cols = ['Driver', 'Compound', 'TyreLife', 'StartFuel', 'FCL', 'LapTime', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'SumLonAcc', 'SumLatAcc', 'MeanLapSpeed', 'LonDistanceDTW', 'LatDistanceDTW']
     preprocessed_df = lap_df[final_cols].reset_index(drop=True)
     print(preprocessed_df.head())
     print('Shape:', preprocessed_df.shape)
@@ -170,13 +230,17 @@ def season_dataset(year=2023, fuel_start=100):
 
 
 # wyscig
-# df_race = build_dataset(gp_name='Bahrain')
+# gp_name='United States'
+# df_race = build_dataset(gp_name=gp_name)
 # print(df_race.head())
+# df_race.to_pickle(f'{gp_name}_full_dataset.pkl')
 
-# sezon
+#sezon
 df_season = season_dataset()
 print(df_season.head())
-df_season.to_pickle('season_laps.pkl')
+df_season.to_pickle('season_full_dataset.pkl')
+
+
 # TODO/DO OBGADANIA
 # pełny dataset robi sie około 22 minut !!!
 # wyrzucanie prze isaccurate / deleted reason (metoda accurate i not_deleted z api)
