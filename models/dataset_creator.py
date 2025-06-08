@@ -4,12 +4,13 @@ import fastf1
 import glob
 import sys
 import os
+
 sys.path.append('..')
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from telemetry.telemetry_data_preprocessing import telemetry_computations
+from telemetry.telemetry_data_preprocessing import TelemetryProcessing
 from loader import load_telemetry
 
-# jak ja gardze file handiling w py (tak to dziala bo rekursywnie idziemy od tego pliku)
+# jak ja gardze file handiling w py (tak to dziala bo rekursywnie idziemy od tego pliku) XDDDDDD
 cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cache')
 if not os.path.exists(cache_dir):
     os.makedirs(cache_dir)
@@ -116,42 +117,24 @@ def build_dataset(gp_name, year=2023, fuel_start=100):
     except FileNotFoundError:
         raise FileNotFoundError(f"Telemetry data not found for {gp_name}. Expected file: {telemetry_path}")
 
-    tel_df['mean_lap_speed'] = tel_df.groupby(['DriverNumber', 'LapNumber'])['Speed'].transform('mean')
+    tel = TelemetryProcessing(tel_df)
     
-    tc = telemetry_computations()
-    lon_accs, lat_accs = [], []
-    for _, lap in lap_df.iterrows():
-        tel = tel_df[(tel_df['DriverNumber'] == lap['DriverNumber']) & (tel_df['LapNumber'] == lap['LapNumber'])]
-        if not tel.empty:
-            try:
-                # Calculate accelerations
-                lon, lat = tc.compute_accelerations(tel)
-                lon_accs.append(np.mean(lon))
-                lat_accs.append(np.mean(lat))
-            except Exception as e:
-                print(f"Error processing telemetry for lap {lap['LapNumber']}: {e}")
-                lon_accs.append(np.nan)
-                lat_accs.append(np.nan)
-        else:
-            lon_accs.append(np.nan)
-            lat_accs.append(np.nan)
-            
-    lap_df_with_speeds = pd.merge(
+    tel.calculate_mean_lap_speed()
+    tel.compute_accelerations()
+    tel.normalize_drs()
+    lap_telemetry = tel.get_single_lap_data()
+    
+    lap_df = pd.merge(
         lap_df,
-        tel_df.groupby(['DriverNumber', 'LapNumber'])['mean_lap_speed'].first().reset_index(),
+        lap_telemetry,
         on=['DriverNumber', 'LapNumber'],
         how='left'
     )
-    
-    lap_df['LonAcc'] = lon_accs
-    lap_df['LatAcc'] = lat_accs
-    lap_df['MeanSpeed'] = lap_df_with_speeds['mean_lap_speed']
-    
     #--------------POGODA-------------------------------    
     
     
     # ----------------SKLADANIE-------------------
-    final_cols = ['Driver', 'Compound', 'TyreLife', 'StartFuel', 'FCL', 'LapTime', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'LonAcc', 'LatAcc', 'MeanSpeed']
+    final_cols = ['Driver', 'Compound', 'TyreLife', 'StartFuel', 'FCL', 'LapTime', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'SumLonAcc', 'SumLatAcc', 'MeanLapSpeed']
     preprocessed_df = lap_df[final_cols].reset_index(drop=True)
     print(preprocessed_df.head())
     print('Shape:', preprocessed_df.shape)

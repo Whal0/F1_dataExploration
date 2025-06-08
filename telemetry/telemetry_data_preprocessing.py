@@ -132,7 +132,7 @@ class TelemetryProcessing:
 
     def calculate_mean_lap_speed(self):
 
-        self.data["mean_lap_speed"] = self.data.groupby(["DriverNumber", "LapNumber"])["Speed"].transform("mean")
+        self.data["MeanLapSpeed"] = self.data.groupby(["DriverNumber", "LapNumber"])["Speed"].transform("mean")
 
         return self
 
@@ -143,7 +143,6 @@ class TelemetryProcessing:
         all_lon, all_lat = [], []
 
         for (driver, lap), group in self.data.groupby(['DriverNumber', 'LapNumber']):
-            group = group.sort_values('Time')  # sort before computing derivatives
             lon_, lat_ = computations.compute_accelerations(telemetry=group)
             all_lon.append(lon_)
             all_lat.append(lat_)
@@ -151,14 +150,14 @@ class TelemetryProcessing:
         all_lon_series = [pd.Series(arr) for arr in all_lon]
         all_lat_series = [pd.Series(arr) for arr in all_lat]
 
-        self.data['lon_acc'] = pd.concat(all_lon_series, ignore_index=True)
-        self.data['lat_acc'] = pd.concat(all_lat_series, ignore_index=True)
+        self.data['LonAcc'] = pd.concat(all_lon_series, ignore_index=True)
+        self.data['LatAcc'] = pd.concat(all_lat_series, ignore_index=True)
     
-        self.data['abs_lat_acc'] = self.data['lat_acc'].abs()
-        self.data['abs_lon_acc'] = self.data['lon_acc'].abs()
+        self.data['AbsLatAcc'] = self.data['LatAcc'].abs()
+        self.data['AbsLonAcc'] = self.data['LonAcc'].abs()
 
-        self.data['sum_lat_acc'] = self.data.groupby(['DriverNumber', 'LapNumber'])['abs_lat_acc'].transform('sum')
-        self.data['sum_lon_acc'] = self.data.groupby(['DriverNumber', 'LapNumber'])['abs_lon_acc'].transform('sum')
+        self.data['SumLatAcc'] = self.data.groupby(['DriverNumber', 'LapNumber'])['AbsLatAcc'].transform('sum')
+        self.data['SumLonAcc'] = self.data.groupby(['DriverNumber', 'LapNumber'])['AbsLonAcc'].transform('sum')
 
         return self
 
