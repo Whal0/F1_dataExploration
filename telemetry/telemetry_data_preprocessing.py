@@ -221,7 +221,6 @@ class telemetry_computations:
         epsilon = 1e-9
         
         # (0) Prepare inputs
-        print(type(t))
         # (0.1) Time needs to be transformed to seconds
         if t.dtype == 'timedelta64[ns]':
             t = t_in.apply(lambda x: x.total_seconds()).to_numpy()

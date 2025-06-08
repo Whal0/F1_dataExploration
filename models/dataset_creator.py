@@ -1,0 +1,202 @@
+import pandas as pd
+import numpy as np
+import fastf1
+import glob
+import sys
+import os
+sys.path.append('..')
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from telemetry.telemetry_data_preprocessing import telemetry_computations
+from loader import load_telemetry
+
+# jak ja gardze file handiling w py (tak to dziala bo rekursywnie idziemy od tego pliku)
+cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'cache')
+if not os.path.exists(cache_dir):
+    os.makedirs(cache_dir)
+fastf1.Cache.enable_cache(cache_dir)
+
+TRACK_INFO = {
+    'Bahrain': (5.412, 308.238),
+    'Saudi Arabia': (6.174, 308.450),
+    'Australia': (5.278, 306.124),
+    'Azerbaijan': (6.003, 306.049),
+    'Miami': (5.412, 308.326),
+    'Monaco': (3.337, 260.286),
+    'Spain': (4.675, 308.424),
+    'Canada': (4.361, 305.270),
+    'Austria': (4.318, 306.452),
+    'Great Britain': (5.891, 306.198),
+    'Hungary': (4.381, 306.670),
+    'Belgium': (7.004, 308.052),
+    'Netherlands': (4.259, 306.587),
+    'Italy': (5.793, 306.720),
+    'Singapore': (4.940, 308.706),
+    'Japan': (5.807, 307.471),
+    'Qatar': (5.419, 308.611),
+    'United States': (5.513, 308.405),
+    'Mexico': (4.304, 305.354),
+    'Brazil': (4.309, 305.879),
+    'Las Vegas': (6.201, 305.880),
+    'Abu Dhabi': (5.281, 305.355),
+}
+
+def calculate_needed_fuel(lap_length, track_length, fuel_start=100, fuel_end=1):
+    laps_per_track = int(track_length / lap_length)
+    fuel_per_lap = (fuel_start - fuel_end) / laps_per_track
+    return fuel_per_lap
+
+def calculate_start_fuel(lap_number, fuel_per_lap, fuel_start=100):
+    if lap_number == 1:
+        return fuel_start
+    else:
+        return max(0, fuel_start - (lap_number - 1) * fuel_per_lap)
+
+
+#obecnie nie potrzebne
+def calculate_avg_fuel(row, fuel_per_lap, fuel_start=100):
+    lap_number = row['LapNumber']
+
+    if lap_number == 1:
+        return fuel_start
+    else:
+        current_fuel = calculate_start_fuel(lap_number, fuel_per_lap, fuel_start)
+        prev_fuel = calculate_start_fuel(lap_number - 1, fuel_per_lap, fuel_start)
+        return (current_fuel + prev_fuel) / 2
+
+def build_dataset(gp_name, year=2023, fuel_start=100):
+    # track info
+    try:
+        lap_length, track_length = TRACK_INFO[gp_name]
+    except KeyError:
+        raise ValueError(f"No track information found for {gp_name}. Available tracks: {', '.join(TRACK_INFO.keys())}")
+    
+    #load track
+    session = fastf1.get_session(year, gp_name, 'R')
+    session.load()
+    lap_df = session.laps
+    main_cols = ['Driver', 'Team', 'Compound', 'TyreLife', 'LapTime', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'LapNumber', 'DriverNumber']
+    
+    # drop NA
+    lap_df = lap_df[main_cols].dropna()
+    # -----------PALIWO------------ 
+    fuel_per_lap = calculate_needed_fuel(lap_length=lap_length, track_length=track_length, fuel_start=fuel_start)
+    lap_df['StartFuel'] = lap_df.apply(lambda row: calculate_start_fuel(row['LapNumber'], fuel_per_lap, fuel_start), axis=1)
+    
+    # w srodku innej zeby trzymala zmienne, mozna na outer scope jak chcemy byc "czytelni"
+    def calculate_FCL(row, fuel_penalty=0.03):
+        if pd.isnull(row['LapTime']):
+            return np.nan
+        if row['LapNumber'] == 1:
+            avg_fuel = fuel_start
+        else:
+            current_fuel = row['StartFuel']
+            prev_fuel = fuel_start if row['LapNumber'] == 2 else row['StartFuel'] + fuel_per_lap
+            avg_fuel = (current_fuel + prev_fuel) / 2
+            
+        fuel_correction = pd.Timedelta(seconds=fuel_penalty * avg_fuel)
+        fcl = row['LapTime'] - fuel_correction
+        return fcl.total_seconds() if not pd.isnull(fcl) else np.nan
+    
+    lap_df['FCL'] = lap_df.apply(calculate_FCL, axis=1)
+
+
+    # -----------TELEMETRIA------------ 
+    # na roznice miedzy fastf1 a mna
+    gp_file_names = {
+        'Saudi Arabia': 'Saudi',
+        'Great Britain': 'Great Britain',
+        'United States': 'USA',
+        'Abu Dhabi': 'Abu Dhabi'
+    }
+    
+    file_gp_name = gp_file_names.get(gp_name, gp_name)
+    telemetry_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data_telemetry', f'{file_gp_name}.pkl')
+    try:
+        tel_df = load_telemetry(telemetry_path)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Telemetry data not found for {gp_name}. Expected file: {telemetry_path}")
+
+    tel_df['mean_lap_speed'] = tel_df.groupby(['DriverNumber', 'LapNumber'])['Speed'].transform('mean')
+    
+    tc = telemetry_computations()
+    lon_accs, lat_accs = [], []
+    for _, lap in lap_df.iterrows():
+        tel = tel_df[(tel_df['DriverNumber'] == lap['DriverNumber']) & (tel_df['LapNumber'] == lap['LapNumber'])]
+        if not tel.empty:
+            try:
+                # Calculate accelerations
+                lon, lat = tc.compute_accelerations(tel)
+                lon_accs.append(np.mean(lon))
+                lat_accs.append(np.mean(lat))
+            except Exception as e:
+                print(f"Error processing telemetry for lap {lap['LapNumber']}: {e}")
+                lon_accs.append(np.nan)
+                lat_accs.append(np.nan)
+        else:
+            lon_accs.append(np.nan)
+            lat_accs.append(np.nan)
+            
+    lap_df_with_speeds = pd.merge(
+        lap_df,
+        tel_df.groupby(['DriverNumber', 'LapNumber'])['mean_lap_speed'].first().reset_index(),
+        on=['DriverNumber', 'LapNumber'],
+        how='left'
+    )
+    
+    lap_df['LonAcc'] = lon_accs
+    lap_df['LatAcc'] = lat_accs
+    lap_df['MeanSpeed'] = lap_df_with_speeds['mean_lap_speed']
+    
+    #--------------POGODA-------------------------------    
+    
+    
+    # ----------------SKLADANIE-------------------
+    final_cols = ['Driver', 'Compound', 'TyreLife', 'StartFuel', 'FCL', 'LapTime', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'LonAcc', 'LatAcc', 'MeanSpeed']
+    preprocessed_df = lap_df[final_cols].reset_index(drop=True)
+    print(preprocessed_df.head())
+    print('Shape:', preprocessed_df.shape)
+    return preprocessed_df
+
+def season_dataset(year=2023, fuel_start=100):
+    race_dfs = []
+    
+    for gp_name in TRACK_INFO.keys():
+        try:
+            print(f"Processing {gp_name} GP data...")
+            df = build_dataset(gp_name=gp_name, year=year, fuel_start=fuel_start)
+            # name
+            df['Track'] = gp_name
+            race_dfs.append(df)
+            
+        except Exception as e:
+            print(f"Skipping {gp_name} GP: {str(e)}")
+    
+    # Combine all race dataframes
+    if not race_dfs:
+        raise ValueError("No race data was successfully processed")
+    
+    season_df = pd.concat(race_dfs, ignore_index=True)
+    
+    # Reorder columns to put Track at the beginning
+    cols = ['Track'] + [col for col in season_df.columns if col != 'Track']
+    season_df = season_df[cols]
+    
+    print("\nFull season dataset shape:", season_df.shape)
+    
+    return season_df
+
+
+# wyscig
+# df_race = build_dataset(gp_name='Bahrain')
+# print(df_race.head())
+
+# sezon
+df_season = season_dataset()
+print(df_season.head())
+df_season.to_pickle('season_laps.pkl')
+# TODO/DO OBGADANIA
+# pełny dataset robi sie około 22 minut !!!
+# wyrzucanie prze isaccurate / deleted reason (metoda accurate i not_deleted z api)
+# inne rzeczy z telemetri wczytywac idk
+# pogoda
+# uzycie tylko quicklaps
