@@ -88,38 +88,38 @@ def divide_column_by_sign(df : pd.DataFrame, column : str) -> pd.DataFrame:
     return df       
 
 ## funkcja do ładowania danych
-def load_data():
-    global global_df
+# def load_data():
+#     global global_df
 
-    session = fastf1.get_session(2023, 'Bahrain', 'R')
-    session.load(telemetry=True)
-    laps = session.laps
+#     session = fastf1.get_session(2023, 'Bahrain', 'R')
+#     session.load(telemetry=True)
+#     laps = session.laps
 
-    global_df = laps.copy()  # zachowaj pełne dane globalnie (opcjonalnie)
+#     global_df = laps.copy()  # zachowaj pełne dane globalnie (opcjonalnie)
 
-    # Filtrowanie i kopiowanie
-    df = laps.dropna(subset=['LapTime', 'LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL']).copy()
-    df['LapTime_sec'] = df['LapTime'].dt.total_seconds()
+#     # Filtrowanie i kopiowanie
+#     df = laps.dropna(subset=['LapTime', 'LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL']).copy()
+#     df['LapTime_sec'] = df['LapTime'].dt.total_seconds()
 
-    # Zbieranie telemetrii
-    telemetry_data = []
-    for _, lap in df.iterrows():
-        tel = lap.get_telemetry()
-        tel['DriverNumber'] = lap['DriverNumber']  
-        tel['LapNumber'] = lap['LapNumber']
-        telemetry_data.append(tel)
+#     # Zbieranie telemetrii
+#     telemetry_data = []
+#     for _, lap in df.iterrows():
+#         tel = lap.get_telemetry()
+#         tel['DriverNumber'] = lap['DriverNumber']  
+#         tel['LapNumber'] = lap['LapNumber']
+#         telemetry_data.append(tel)
 
     
-    telemetry_df = pd.concat(telemetry_data, ignore_index=True)
-    telemetry_df['DriverNumber'] = telemetry_df['DriverNumber'].astype(int)
-    # Przygotowanie X i y
-    X = df[['LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL']]
-    y = df['LapTime_sec']
+#     telemetry_df = pd.concat(telemetry_data, ignore_index=True)
+#     telemetry_df['DriverNumber'] = telemetry_df['DriverNumber'].astype(int)
+#     # Przygotowanie X i y
+#     X = df[['LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL']]
+#     y = df['LapTime_sec']
     
-    return telemetry_df, X, y, df
+#     return telemetry_df, X, y, df
 
 ## klasa dla telemetrii z funkcjami pomocniczymi
-class Telemetry: 
+class TelemetryProcessing: 
 
     def __init__(self, data : pd.DataFrame):
         self.data = data
@@ -178,9 +178,11 @@ class Telemetry:
         
         final_df = pd.DataFrame(columns=self.data.columns)
 
+            
         for driver in self.data['DriverNumber'].unique():
             driver_df = self.data[self.data['DriverNumber'] == driver]
-            laps = int(driver_df['LapNumber'].max())
+            
+            laps : pd.DataFrame = int(driver_df['LapNumber'].max())
 
             for lap in range(1, laps + 1):
                 lap_df = driver_df[driver_df['LapNumber'] == lap]
@@ -426,7 +428,6 @@ def test():
     pos_data = session.pos_data['1'] 
     telemetry = telemetry.merge(pos_data, on='Time', how='left') 
     telemetry.dropna(inplace=True)
-    telemetry
 
     lon, lat = telemetry_computations().compute_accelerations(telemetry=telemetry)
     
