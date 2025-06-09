@@ -77,10 +77,11 @@ def build_dataset(gp_name, year=2023, fuel_start=100):
     session = fastf1.get_session(year, gp_name, 'R')
     session.load()
     lap_df = session.laps
-    main_cols = ['Driver', 'Team', 'Compound', 'TyreLife', 'LapTime', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'LapNumber', 'DriverNumber']
+    main_cols = ['Driver', 'Team', 'Compound', 'TyreLife', 'LapTime', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'LapNumber', 'DriverNumber', 'LapNumber']
     
     # drop NA
-    lap_df = lap_df[main_cols].dropna()
+    lap_df = lap_df[main_cols]
+    #lap_df = lap_df[main_cols].dropna()
     # -----------PALIWO------------ 
     fuel_per_lap = calculate_needed_fuel(lap_length=lap_length, track_length=track_length, fuel_start=fuel_start)
     lap_df['StartFuel'] = lap_df.apply(lambda row: calculate_start_fuel(row['LapNumber'], fuel_per_lap, fuel_start), axis=1)
@@ -194,7 +195,7 @@ def build_dataset(gp_name, year=2023, fuel_start=100):
     
     
     # ----------------SKLADANIE-------------------
-    final_cols = ['Driver', 'Compound', 'TyreLife', 'StartFuel', 'FCL', 'LapTime', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'SumLonAcc', 'SumLatAcc', 'MeanLapSpeed', 'LonDistanceDTW', 'LatDistanceDTW']
+    final_cols = ['LapNumber','Driver', 'Compound', 'TyreLife', 'StartFuel', 'FCL', 'LapTime', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'SumLonAcc', 'SumLatAcc', 'MeanLapSpeed', 'LonDistanceDTW', 'LatDistanceDTW']
     preprocessed_df = lap_df[final_cols].reset_index(drop=True)
     print(preprocessed_df.head())
     print('Shape:', preprocessed_df.shape)
@@ -238,7 +239,7 @@ def season_dataset(year=2023, fuel_start=100):
 #sezon
 df_season = season_dataset()
 print(df_season.head())
-df_season.to_pickle('season_full_dataset.pkl')
+df_season.to_pickle('season_full_NAs.pkl')
 
 
 # TODO/DO OBGADANIA

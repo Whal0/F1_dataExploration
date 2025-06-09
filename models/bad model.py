@@ -26,6 +26,7 @@ def load_data():
     laps = session.laps
     df = pd.DataFrame(laps)
     global_df = df.copy()
+    print(df.isnull().sum())
     df = df.dropna(subset=['LapTime', 'LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL'])
     df['LapTime_sec'] = df['LapTime'].dt.total_seconds()
     X = df[['LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL']]
@@ -34,7 +35,7 @@ def load_data():
 
 
 X, y = load_data()
-
+print(X.isnull().sum())
 # Scale features
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)

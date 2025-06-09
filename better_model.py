@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 import optuna
 import shap
 from xgboost import XGBRegressor
@@ -13,30 +13,38 @@ from tensorflow.keras.layers import Dense, Dropout
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import EarlyStopping
 
+def convert_timedelta_to_seconds(df):
+    for col in df.columns:
+        if np.issubdtype(df[col].dtype, np.timedelta64):
+            df[col] = df[col].dt.total_seconds()
+    return df
+
 # Load and prepare data
-print("Loading dataset...")
 season_df = pd.read_pickle('season_full.pkl')
-
-# Drop rows with NA values
 season_df = season_df.dropna(subset=['LapTime'])
+season_df = convert_timedelta_to_seconds(season_df)
 
-# Prepare features and target
 X = season_df[['Compound', 'TyreLife', 'StartFuel', 'SpeedI1', 'SpeedI2', 'SpeedFL', 
                'SumLonAcc', 'SumLatAcc', 'MeanLapSpeed', 'LonDistanceDTW', 'LatDistanceDTW']]
 y = season_df['LapTime']
 
-# Convert categorical variables to numeric
-X = pd.get_dummies(X, columns=['Compound'])
 
-# Scale features
+le = LabelEncoder()
+X.loc[:, 'Compound'] = le.fit_transform(X['Compound'])
+
+# Remove inf/-inf and NaN values
+X = X.replace([np.inf, -np.inf], np.nan)
+X = X.dropna()
+y = y.loc[X.index]
+
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
 X_scaled = pd.DataFrame(X_scaled, columns=X.columns)
 
-# Split the data
+
 X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
 
-# Optimize XGBoost with Optuna
+
 def objective_xgb(trial):
     params = {
         'max_depth': trial.suggest_int('max_depth', 3, 10),
@@ -150,23 +158,32 @@ print(f"XGBoost R2: {r2_score(y_test, y_pred_xgb):.4f}")
 print(f"Keras MSE: {mean_squared_error(y_test, y_pred_keras):.4f}")
 print(f"Keras R2: {r2_score(y_test, y_pred_keras):.4f}")
 
-# Plot actual vs predicted
-plt.figure(figsize=(12, 6))
-plt.subplot(1, 2, 1)
-plt.scatter(y_test, y_pred_xgb, alpha=0.5)
-plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
-plt.xlabel('Actual Lap Time')
-plt.ylabel('Predicted Lap Time')
-plt.title('XGBoost: Actual vs Predicted')
+# --- Compare to actual laps of one track ---
+track_name = "Bahrain"  # Change to your desired track name
 
-plt.subplot(1, 2, 2)
-plt.scatter(y_test, y_pred_keras, alpha=0.5)
-plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--', lw=2)
+# Get the indices in the test set that correspond to the chosen track
+test_indices = y_test.index
+track_mask = season_df.loc[test_indices, 'Track'] == track_name
+
+y_test_track = y_test[track_mask]
+y_pred_xgb_track = y_pred_xgb[track_mask]
+y_pred_keras_track = y_pred_keras[track_mask]
+
+plt.figure(figsize=(10, 5))
+plt.scatter(y_test_track, y_pred_xgb_track, alpha=0.5, label='XGBoost')
+plt.scatter(y_test_track, y_pred_keras_track, alpha=0.5, label='Keras')
+plt.plot([y_test_track.min(), y_test_track.max()], [y_test_track.min(), y_test_track.max()], 'r--', lw=2)
 plt.xlabel('Actual Lap Time')
 plt.ylabel('Predicted Lap Time')
-plt.title('Keras: Actual vs Predicted')
+plt.title(f'Actual vs Predicted Lap Times for {track_name}')
+plt.legend()
 plt.tight_layout()
 plt.show()
+
+print(f"{track_name} XGBoost MSE: {mean_squared_error(y_test_track, y_pred_xgb_track):.4f}")
+print(f"{track_name} XGBoost R2: {r2_score(y_test_track, y_pred_xgb_track):.4f}")
+print(f"{track_name} Keras MSE: {mean_squared_error(y_test_track, y_pred_keras_track):.4f}")
+print(f"{track_name} Keras R2: {r2_score(y_test_track, y_pred_keras_track):.4f}")
 
 # Plot prediction errors distribution
 plt.figure(figsize=(12, 6))
@@ -217,6 +234,6 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# Save best models
-best_xgb.save_model('best_xgb_model.json')
-best_keras.save('best_keras_model')
+
+
+
