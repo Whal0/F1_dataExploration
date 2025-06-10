@@ -1,4 +1,5 @@
 cache/
+data/ 
 *.pkl
 
 # Byte-compiled / optimized / DLL files

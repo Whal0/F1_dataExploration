@@ -9,6 +9,12 @@ import numpy as np #nie masz czasu bawic sie w optymalizje
 import matplotlib.pyplot as plt
 import optuna
 import seaborn as sns
+from scipy.stats import ttest_rel
+import shap
+from xgboost import XGBRegressor
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.optimizers import Adam
 
 
 
@@ -20,6 +26,7 @@ def load_data():
     laps = session.laps
     df = pd.DataFrame(laps)
     global_df = df.copy()
+    print(df.isnull().sum())
     df = df.dropna(subset=['LapTime', 'LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL'])
     df['LapTime_sec'] = df['LapTime'].dt.total_seconds()
     X = df[['LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL']]
@@ -28,7 +35,7 @@ def load_data():
 
 
 X, y = load_data()
-
+print(X.isnull().sum())
 # Scale features
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)
@@ -80,6 +87,25 @@ print(f"Best Decision Tree MSE: {study.best_value:.3f}")
 best_tree = DecisionTreeRegressor(random_state=12, **study.best_params)
 best_tree.fit(X_train, y_train)
 y_pred_best_tree = best_tree.predict(X_test)
+
+# XGBoost Model
+xgb_model = XGBRegressor(objective='reg:squarederror', random_state=12, n_estimators=100)
+xgb_model.fit(X_train, y_train)
+y_pred_xgb = xgb_model.predict(X_test)
+mse_xgb = mean_squared_error(y_test, y_pred_xgb)
+print(f"XGBoost MSE: {mse_xgb:.3f}")
+
+# Keras Neural Network
+keras_model = Sequential([
+    Dense(16, activation='relu', input_shape=(X_train.shape[1],)),
+    Dense(8, activation='relu'),
+    Dense(1)
+])
+keras_model.compile(optimizer=Adam(learning_rate=0.01), loss='mse')
+keras_model.fit(X_train, y_train, epochs=50, batch_size=16, verbose=0)
+y_pred_keras = keras_model.predict(X_test).flatten()
+mse_keras = mean_squared_error(y_test, y_pred_keras)
+print(f"Keras Neural Net MSE: {mse_keras:.3f}")
 
 # Example prediction
 example = X_test[0]
@@ -156,6 +182,10 @@ sns.scatterplot(
     alpha=0.4,
     edgecolor='w'
 )
+# Add lines connecting the points for each type
+for t, color in zip(['Actual', 'Predicted_Linear', 'Predicted_Tree', 'Predicted_OptunaTree'], ['black', 'blue', 'green', 'orange']):
+    subset = plot_long[plot_long['Type'] == t].sort_values('LapNumber')
+    plt.plot(subset['LapNumber'], subset['LapTime'], color=color, alpha=0.7, label=f'{t} (line)')
 plt.xlabel("Lap Number")
 plt.ylabel("Lap Time (seconds)")
 plt.gca().invert_yaxis()
@@ -177,7 +207,7 @@ driver1 = 'VER'
 driver2 = 'LEC'
 
 
-filtered = global_df.dropna(subset=['LapTime', 'LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'Driver'])
+filtered = global_df.dropna(subset=['LapTime', 'LapNumber', 'SpeedI1', 'SpeedI2', 'SpeedFL', 'Driver']).copy()
 filtered['LapTime_sec'] = filtered['LapTime'].dt.total_seconds()
 filtered = filtered[filtered['Driver'].isin([driver1, driver2])].copy()
 
@@ -229,6 +259,87 @@ plt.ylabel('Lap Time (seconds)')
 plt.gca().invert_yaxis()
 plt.title(f'Actual vs Predicted Lap Times for {driver1} and {driver2} (Full Dataset Model)')
 plt.grid(True, linestyle='--', alpha=0.7)
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+# Statistical tests for model predictions
+alpha = 0.05
+
+test_linear_tree = ttest_rel(y_pred_linear, y_pred_tree)
+test_linear_actual = ttest_rel(y_pred_linear, y_test)
+test_tree_actual = ttest_rel(y_pred_tree, y_test)
+
+def print_ttest(label, ttest):
+    print(f"{label}: statistic = {ttest.statistic:.3f}, p-value = {ttest.pvalue:.4f}, df = {ttest.df}")
+
+def interpret_ttest(test_result, label1, label2):
+    if test_result.pvalue < alpha:
+        print(f"The difference between {label1} and {label2} is statistically significant (p = {test_result.pvalue:.4f}).")
+    else:
+        print(f"No statistically significant difference between {label1} and {label2} (p = {test_result.pvalue:.4f}).")
+
+print("\nStatistical tests (paired t-test):")
+print_ttest("Linear vs Tree", test_linear_tree)
+print_ttest("Linear vs Actual", test_linear_actual)
+print_ttest("Tree vs Actual", test_tree_actual)
+
+interpret_ttest(test_linear_tree, 'Linear Regression', 'Decision Tree')
+interpret_ttest(test_linear_actual, 'Linear Regression', 'Actual')
+interpret_ttest(test_tree_actual, 'Decision Tree', 'Actual')
+
+
+# Feature importance for Linear Regression
+print("\nLinear Regression feature importances (coefficients):")
+for name, coef in zip(X.columns, linear_model.coef_):
+    print(f"{name}: {coef:.4f}")
+
+# Feature importance for Decision Tree
+print("\nDecision Tree feature importances:")
+for name, imp in zip(X.columns, tree_model.feature_importances_):
+    print(f"{name}: {imp:.4f}")
+
+# SHAP values for best_tree (Optuna)
+try:
+    X_test_df = pd.DataFrame(X_test, columns=X.columns)
+    
+
+    explainer = shap.TreeExplainer(best_tree)
+    shap_values = explainer.shap_values(X_test_df)
+    shap.summary_plot(shap_values, X_test_df, feature_names=X.columns)
+    
+    shap.plots.waterfall(shap.Explanation(
+        values=shap_values[0], 
+        base_values=explainer.expected_value, 
+        data=X_test_df.iloc[0], 
+        feature_names=X.columns.tolist()
+    ))
+except Exception as e:
+    print(f"SHAP summary plot failed: {e}")
+
+# Model efficiency plots
+plt.figure(figsize=(10, 6))
+plt.scatter(y_test, y_pred_linear, alpha=0.5, label='Linear Regression', color='blue')
+plt.scatter(y_test, y_pred_tree, alpha=0.5, label='Decision Tree', color='green')
+plt.scatter(y_test, y_pred_best_tree, alpha=0.5, label='Optuna Tree', color='orange')
+plt.scatter(y_test, y_pred_xgb, alpha=0.5, label='XGBoost', color='purple')
+plt.scatter(y_test, y_pred_keras, alpha=0.5, label='Keras NN', color='red')
+plt.xlabel('Actual Lap Time (s)')
+plt.ylabel('Predicted Lap Time (s)')
+plt.title('Actual vs Predicted Lap Times (Test Set)')
+plt.legend()
+plt.tight_layout()
+plt.show()
+
+plt.figure(figsize=(10, 6))
+plt.hist(y_test - y_pred_linear, bins=30, alpha=0.5, label='Linear Regression', color='blue')
+plt.hist(y_test - y_pred_tree, bins=30, alpha=0.5, label='Decision Tree', color='green')
+plt.hist(y_test - y_pred_best_tree, bins=30, alpha=0.5, label='Optuna Tree', color='orange')
+plt.hist(y_test - y_pred_xgb, bins=30, alpha=0.5, label='XGBoost', color='purple')
+plt.hist(y_test - y_pred_keras, bins=30, alpha=0.5, label='Keras NN', color='red')
+plt.xlabel('Prediction Error (s)')
+plt.ylabel('Frequency')
+plt.title('Distribution of Prediction Errors')
 plt.legend()
 plt.tight_layout()
 plt.show()
