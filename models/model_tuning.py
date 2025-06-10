@@ -1,1 +1,0 @@
-#tu bedzie szukanie tego najlepsziejszego modelu, koksa nad koksami
